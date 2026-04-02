@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
+
+:root {
+  --fei-orange: #F97316;
+  --fei-dark: #1C1917;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Smooth scrolling for chat */
+.chat-scroll {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Typing indicator animation */
+@keyframes bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-4px);
+  }
+}
+
+.typing-dot {
+  animation: bounce 1.4s infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Mobile keyboard fix — prevent layout shift */
+@supports (height: 100dvh) {
+  html,
+  body {
+    height: 100dvh;
+  }
+}
+
+/* ==============================================
+   Itinerary typography — matches approved mockup
+   Hierarchy: h2 (day group) > h3 (day) > bold (time) > p (why + notes)
+   ============================================== */
+
+/* Day group headers — "Days 3-4: Culture Meets Adventure" */
+/* Large top margin creates clear separation from previous day's content */
+.prose h2 {
+  font-size: 0.975rem !important;
+  font-weight: 600 !important;
+  color: #292524 !important;
+  margin-top: 2rem !important;
+  margin-bottom: 0.25rem !important;
+  padding-top: 1.25rem !important;
+  border-top: 0.5px solid #e7e5e4 !important;
+  line-height: 1.5 !important;
+}
+
+/* Individual day headers — "Day 3" */
+.prose h3 {
+  font-size: 0.9rem !important;
+  font-weight: 600 !important;
+  color: #44403c !important;
+  margin-top: 0.75rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+/* Horizontal rule between days within a group — subtle divider */
+.prose hr {
+  border: none !important;
+  border-top: 0.5px solid #e7e5e4 !important;
+  margin-top: 1.75rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+/* Paragraphs — "why" descriptions and note lines */
+.prose p {
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+  line-height: 1.55 !important;
+}
+
+/* First h2 in a message shouldn't have the divider border or excess margin */
+.prose > h2:first-child {
+  margin-top: 0.15rem !important;
+  border-top: none !important;
+  padding-top: 0 !important;
+}
