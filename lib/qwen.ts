@@ -29,7 +29,7 @@ export async function queryQwen(
   try {
     const client = new OpenAI({
       apiKey,
-      baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     });
 
     const response = await client.chat.completions.create(
