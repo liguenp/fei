@@ -1,60 +1,123 @@
 /**
  * Chat API Route
  * ===============
- * This is Fēi's brain. When a user sends a message:
- * 1. Check if it's about specific places → query Chinese sources in parallel
- * 2. Send conversation + any Chinese-source context to Claude
- * 3. Stream Claude's response back to the browser (no timeout!)
- *
- * IMPORTANT: This runs server-side. API keys stay secret.
- * The streaming approach is the key fix for mobile timeout issues.
+ * This is Fēi's brain. Configurable to use either Claude or Gemini
+ * as the primary AI, controlled by the PRIMARY_AI env variable.
+ * 
+ * Set PRIMARY_AI=gemini in .env.local to use Gemini (cheaper)
+ * Set PRIMARY_AI=claude to use Claude (higher quality)
+ * Default: gemini
  */
 
-import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest } from "next/server";
 import { SYSTEM_PROMPT } from "@/lib/system-prompt";
 import { queryChinaSource } from "@/lib/china-source";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
-});
-
 // Keywords that suggest the user is asking about specific places or activities
 const PLACE_KEYWORDS = [
-  "recommend",
-  "suggest",
-  "where",
-  "restaurant",
-  "hotel",
-  "visit",
-  "attraction",
-  "food",
-  "eat",
-  "stay",
-  "see",
-  "do",
-  "temple",
-  "museum",
-  "park",
-  "market",
-  "shop",
-  "itinerary",
-  "plan",
-  "day",
-  "morning",
-  "afternoon",
-  "evening",
-  "place",
-  "spot",
-  "area",
-  "neighbourhood",
-  "neighborhood",
-  "district",
+  "recommend", "suggest", "where", "restaurant", "hotel", "visit",
+  "attraction", "food", "eat", "stay", "see", "do", "temple", "museum",
+  "park", "market", "shop", "itinerary", "plan", "day", "morning",
+  "afternoon", "evening", "place", "spot", "area", "neighbourhood",
+  "neighborhood", "district",
 ];
 
 function shouldQueryChineseSource(message: string): boolean {
   const lower = message.toLowerCase();
   return PLACE_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+// Stream using Claude (Anthropic SDK)
+async function streamClaude(
+  systemPrompt: string,
+  messages: { role: string; content: string }[]
+) {
+  const Anthropic = (await import("@anthropic-ai/sdk")).default;
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "" });
+
+  const claudeMessages = messages.map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
+
+  const stream = anthropic.messages.stream({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 4096,
+    system: systemPrompt,
+    messages: claudeMessages,
+  });
+
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const event of stream) {
+          if (
+            event.type === "content_block_delta" &&
+            event.delta.type === "text_delta"
+          ) {
+            const data = JSON.stringify({ text: event.delta.text });
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          }
+        }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      } catch (err) {
+        console.error("Claude stream error:", err);
+        controller.error(err);
+      }
+    },
+  });
+}
+
+// Stream using Gemini (Google Gen AI SDK)
+async function streamGemini(
+  systemPrompt: string,
+  messages: { role: string; content: string }[]
+) {
+  const { GoogleGenAI } = await import("@google/genai");
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+
+  // Convert messages to Gemini format
+  const geminiHistory = messages.slice(0, -1).map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+
+  const lastMessage = messages[messages.length - 1].content;
+
+  const response = await ai.models.generateContentStream({
+    model: "gemini-2.5-flash",
+    contents: [
+      ...geminiHistory,
+      { role: "user", parts: [{ text: lastMessage }] },
+    ],
+    config: {
+      systemInstruction: systemPrompt,
+      maxOutputTokens: 16384,
+      temperature: 0.7,
+    },
+  });
+
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of response) {
+          const text = chunk.text;
+          if (text) {
+            const data = JSON.stringify({ text });
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          }
+        }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      } catch (err) {
+        console.error("Gemini stream error:", err);
+        controller.error(err);
+      }
+    },
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -71,15 +134,10 @@ export async function POST(request: NextRequest) {
       [...messages].reverse().find((m: { role: string }) => m.role === "user")
         ?.content || "";
 
-    // Only query Chinese sources when:
-    // 1. The conversation is past the info-gathering phase (4+ messages = 2 exchanges)
-    // 2. The message contains place-related keywords
-    // This keeps early responses fast (3-5s) and only adds the Chinese-source
-    // delay when Fēi is actually recommending specific places.
+    // Only query Chinese sources when conversation is past info-gathering
     const isReadyForPlaces = messages.length >= 4;
     let chinaContext = "";
     if (isReadyForPlaces && shouldQueryChineseSource(lastUserMessage)) {
-      // Include recent conversation context so Chinese source AI knows the group details
       const recentContext = messages
         .slice(-6)
         .map((m: { role: string; content: string }) => `${m.role}: ${m.content}`)
@@ -91,48 +149,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Build the system prompt, injecting Chinese-source context if available
     const fullSystemPrompt = SYSTEM_PROMPT + chinaContext;
 
-    // Format messages for Claude
-    const claudeMessages = messages.map(
-      (m: { role: string; content: string }) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })
-    );
+    // Choose AI based on PRIMARY_AI env variable (default: gemini)
+    const primaryAI = process.env.PRIMARY_AI || "gemini";
+    console.log(`Using ${primaryAI} as primary AI`);
 
-    // Stream the response — this keeps the connection alive on mobile
-    const stream = anthropic.messages.stream({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
-      system: fullSystemPrompt,
-      messages: claudeMessages,
-    });
-
-    // Convert to a ReadableStream for the browser
-    const encoder = new TextEncoder();
-    const readable = new ReadableStream({
-      async start(controller) {
-        try {
-          for await (const event of stream) {
-            if (
-              event.type === "content_block_delta" &&
-              event.delta.type === "text_delta"
-            ) {
-              // Send each text chunk as a server-sent event
-              const data = JSON.stringify({ text: event.delta.text });
-              controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-            }
-          }
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-        } catch (err) {
-          console.error("Stream error:", err);
-          controller.error(err);
-        }
-      },
-    });
+    let readable: ReadableStream;
+    if (primaryAI === "claude") {
+      readable = await streamClaude(fullSystemPrompt, messages);
+    } else {
+      readable = await streamGemini(fullSystemPrompt, messages);
+    }
 
     return new Response(readable, {
       headers: {

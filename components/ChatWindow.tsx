@@ -42,7 +42,7 @@ const markdownComponents: Components = {
  */
 function preprocessMarkdown(content: string): string {
   if (!content) return "";
-  const NOTE_PATTERN = /^(📋|✅|⚠️|⏰|👶|🧓|♿|👴|👵)/;
+  const NOTE_PATTERN = /^(📋|✅|⚠️|⏰|👶|🧓|♿|👴|👵|💡|💰)/;
   const HR_PATTERN = /^---+$/;
   const H2_PATTERN = /^##\s/;
   const lines = content.split("\n");
