@@ -70,6 +70,54 @@ async function streamClaude(
   });
 }
 
+// Stream using Qwen Plus (OpenAI-compatible API via DashScope)
+async function streamQwen(
+  systemPrompt: string,
+  messages: { role: string; content: string }[]
+) {
+  const OpenAI = (await import("openai")).default;
+  const client = new OpenAI({
+    apiKey: process.env.QWEN_API_KEY || "",
+    baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+  });
+
+  const qwenMessages = [
+    { role: "system" as const, content: systemPrompt },
+    ...messages.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    })),
+  ];
+
+  const stream = await client.chat.completions.create({
+    model: "qwen-plus",
+    messages: qwenMessages,
+    max_tokens: 16384,
+    temperature: 0.8,
+    stream: true,
+  });
+
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of stream) {
+          const text = chunk.choices[0]?.delta?.content;
+          if (text) {
+            const data = JSON.stringify({ text });
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          }
+        }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      } catch (err) {
+        console.error("Qwen stream error:", err);
+        controller.error(err);
+      }
+    },
+  });
+}
+
 // Stream using Gemini (Google Gen AI SDK)
 async function streamGemini(
   systemPrompt: string,
@@ -87,7 +135,7 @@ async function streamGemini(
   const lastMessage = messages[messages.length - 1].content;
 
   const response = await ai.models.generateContentStream({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-pro",
     contents: [
       ...geminiHistory,
       { role: "user", parts: [{ text: lastMessage }] },
@@ -134,18 +182,18 @@ export async function POST(request: NextRequest) {
       [...messages].reverse().find((m: { role: string }) => m.role === "user")
         ?.content || "";
 
-    // Only query Chinese sources when conversation is past info-gathering
-    const isReadyForPlaces = messages.length >= 4;
+    // Query Chinese sources when the message contains place-related keywords
+    // With the intake form, even the first message has enough context
     let chinaContext = "";
-    if (isReadyForPlaces && shouldQueryChineseSource(lastUserMessage)) {
-      const recentContext = messages
-        .slice(-6)
+    if (shouldQueryChineseSource(lastUserMessage)) {
+      // Include full conversation context so Chinese source AI knows all details
+      const fullContext = messages
         .map((m: { role: string; content: string }) => `${m.role}: ${m.content}`)
         .join("\n");
-      const enrichedQuery = `Based on this conversation:\n${recentContext}\n\nProvide detailed travel recommendations for: ${lastUserMessage}`;
+      const enrichedQuery = `Based on this conversation:\n${fullContext}\n\nProvide SPECIFIC travel recommendations. Name exact restaurants, shops, venues, and attractions. Include specific details like prices, addresses, what to order, what's unique. Focus on places that locals recommend on 小红书 and 大众点评, not generic tourist advice. For: ${lastUserMessage}`;
       const result = await queryChinaSource(enrichedQuery);
       if (result) {
-        chinaContext = `\n\n[CHINESE SOURCE INTELLIGENCE — from ${result.source}]\nThe following insights come from Chinese travel platforms. Weave these naturally into your response — don't cite the source by name, just use the knowledge as if it's your own expertise:\n\n${result.content}\n\n[END CHINESE SOURCE INTELLIGENCE]`;
+        chinaContext = `\n\n<chinese_source_intel source="${result.source}">\nThe following tips and recommendations come from Chinese travel platforms (小红书, 大众点评, 马蜂窝).\n\nOVERRIDE RULE: If this intel contradicts your own knowledge — e.g. an attraction is closed, hours have changed, a route is no longer available — treat this intel as ground truth. Do NOT use your own assumptions instead.\n\nFor every place in your itinerary:\n1. CHECK if this data mentions it and USE those specific tips\n2. PREFER these tips over your own general knowledge\n3. Include them as 💡 Local tip notes with SPECIFIC details (dish names, prices, stall numbers)\n4. If this data names specific restaurants, shops, or venues, USE those exact names in Chinese characters\n\n${result.content}\n\n</chinese_source_intel>`;
       }
     }
 
@@ -158,6 +206,8 @@ export async function POST(request: NextRequest) {
     let readable: ReadableStream;
     if (primaryAI === "claude") {
       readable = await streamClaude(fullSystemPrompt, messages);
+    } else if (primaryAI === "qwen") {
+      readable = await streamQwen(fullSystemPrompt, messages);
     } else {
       readable = await streamGemini(fullSystemPrompt, messages);
     }
