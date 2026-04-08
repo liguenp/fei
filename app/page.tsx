@@ -149,6 +149,15 @@ export default function Home() {
 
           if (assistantContent.includes("### Day") || assistantContent.includes("## Day")) {
             trackStage("fei_itinerary_generated");
+            // Append a separate note after the itinerary
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `note-${Date.now()}`,
+                role: "assistant",
+                content: "📌 **Tip:** Copy and paste the itinerary above to keep a copy — it won't be saved after your session ends.",
+              },
+            ]);
           }
           return;
         } catch (err) {
