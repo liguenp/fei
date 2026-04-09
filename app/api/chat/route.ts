@@ -199,8 +199,8 @@ export async function POST(request: NextRequest) {
 
     const fullSystemPrompt = SYSTEM_PROMPT + chinaContext;
 
-    // Choose AI based on PRIMARY_AI env variable (default: gemini)
-    const primaryAI = process.env.PRIMARY_AI || "gemini";
+    // Choose AI based on PRIMARY_AI env variable (default: claude)
+    const primaryAI = process.env.PRIMARY_AI || "claude";
     console.log(`Using ${primaryAI} as primary AI`);
 
     let readable: ReadableStream;
