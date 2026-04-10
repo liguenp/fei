@@ -12,6 +12,7 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const trackedStages = useRef<Set<string>>(new Set());
+  const postItineraryCount = useRef(0);
 
   const trackStage = (stage: string, data?: Record<string, string>) => {
     if (trackedStages.current.has(stage)) return;
@@ -29,6 +30,15 @@ export default function Home() {
       const updatedMessages = [...messages, userMessage];
       setMessages(updatedMessages);
       setIsLoading(true);
+
+      if (trackedStages.current.has("fei_itinerary_generated")) {
+        postItineraryCount.current += 1;
+        if (postItineraryCount.current === 1) {
+          window.gtag?.('event', 'post_itinerary_engaged');
+        } else if (postItineraryCount.current === 3) {
+          window.gtag?.('event', 'post_itinerary_deep_engaged');
+        }
+      }
 
       const userMessageCount = updatedMessages.filter(m => m.role === "user").length;
       if (userMessageCount === 1) {
