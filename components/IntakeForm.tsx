@@ -68,6 +68,7 @@ export default function IntakeForm({ onSubmit }: IntakeFormProps) {
 
 Please suggest places for my trip.`;
 
+    window.gtag?.('event', 'form_submitted', { destination: data.destination, duration: data.duration });
     onSubmit(summary);
   };
 

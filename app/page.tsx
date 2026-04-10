@@ -38,6 +38,7 @@ export default function Home() {
       }
       if (/^\d[\d,\s]+$/.test(content.trim()) || /must|skip|optional/i.test(content)) {
         trackStage("fei_place_selection");
+        window.gtag?.('event', 'places_selected');
       }
 
       const apiMessages = updatedMessages.map((m) => ({
@@ -149,6 +150,7 @@ export default function Home() {
 
           if (assistantContent.includes("### Day") || assistantContent.includes("## Day")) {
             trackStage("fei_itinerary_generated");
+            window.gtag?.('event', 'itinerary_generated');
             // Append a separate note after the itinerary
             setMessages((prev) => [
               ...prev,
