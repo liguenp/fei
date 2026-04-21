@@ -1,11 +1,16 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { track } from "@vercel/analytics";
 import Header from "@/components/Header";
 import ChatWindow, { Message } from "@/components/ChatWindow";
 import ChatInput from "@/components/ChatInput";
 import IntakeForm from "@/components/IntakeForm";
+
+const COPY_REMINDER: Omit<Message, "id"> = {
+  role: "assistant",
+  content: "📌 **Tip:** Copy and paste the itinerary above to keep a copy — it won't be saved after your session ends.",
+};
 
 export default function Home() {
   const [showForm, setShowForm] = useState(true);
@@ -13,12 +18,35 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const trackedStages = useRef<Set<string>>(new Set());
   const postItineraryCount = useRef(0);
+  const feedbackShown = useRef(false);
+  const copyReminderShown = useRef(false);
+  const copyReminderTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyReminderTimeout.current) clearTimeout(copyReminderTimeout.current);
+    };
+  }, []);
 
   const trackStage = (stage: string, data?: Record<string, string>) => {
     if (trackedStages.current.has(stage)) return;
     trackedStages.current.add(stage);
     track(stage, data);
   };
+
+  const handleFeedbackClick = useCallback((_value: "positive" | "negative") => {
+    if (copyReminderTimeout.current) {
+      clearTimeout(copyReminderTimeout.current);
+      copyReminderTimeout.current = null;
+    }
+    if (!copyReminderShown.current) {
+      copyReminderShown.current = true;
+      setMessages((prev) => [
+        ...prev,
+        { id: `note-${Date.now()}`, ...COPY_REMINDER },
+      ]);
+    }
+  }, []);
 
   const handleSend = useCallback(
     async (content: string) => {
@@ -161,15 +189,27 @@ export default function Home() {
           if (assistantContent.includes("### Day") || assistantContent.includes("## Day")) {
             trackStage("fei_itinerary_generated");
             window.gtag?.('event', 'itinerary_generated');
-            // Append a separate note after the itinerary
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: `note-${Date.now()}`,
-                role: "assistant",
-                content: "📌 **Tip:** Copy and paste the itinerary above to keep a copy — it won't be saved after your session ends.",
-              },
-            ]);
+            if (!feedbackShown.current) {
+              feedbackShown.current = true;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `feedback-${Date.now()}`,
+                  role: "assistant",
+                  type: "feedback",
+                  content: "",
+                },
+              ]);
+              copyReminderTimeout.current = setTimeout(() => {
+                if (!copyReminderShown.current) {
+                  copyReminderShown.current = true;
+                  setMessages((prev) => [
+                    ...prev,
+                    { id: `note-${Date.now()}`, ...COPY_REMINDER },
+                  ]);
+                }
+              }, 15000);
+            }
           }
           return;
         } catch (err) {
@@ -214,7 +254,7 @@ export default function Home() {
         <IntakeForm onSubmit={handleFormSubmit} />
       ) : (
         <>
-          <ChatWindow messages={messages} isLoading={isLoading} />
+          <ChatWindow messages={messages} isLoading={isLoading} onFeedbackClick={handleFeedbackClick} />
           <ChatInput onSend={handleSend} disabled={isLoading} />
         </>
       )}
