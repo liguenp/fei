@@ -41,7 +41,7 @@ async function streamClaude(
   }));
 
   const stream = anthropic.messages.stream({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 4096,
     system: systemPrompt,
     messages: claudeMessages,
